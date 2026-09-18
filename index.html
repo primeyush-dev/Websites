@@ -1,0 +1,1132 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>YUSH TOOLS — Control Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   API BASE — IMPORTANT IF YOU DEPLOY THIS PAGE ON NETLIFY
+   Netlify only serves static files (+ optional JS/Go functions) — it
+   cannot execute the .php files under /api or /index.php. If this page
+   is hosted on Netlify, every fetch('api/....php') call will 404
+   ("Bad server response (HTTP 404)"), because there's no PHP runtime
+   behind that URL, no matter how correct the PHP code itself is.
+   Fix: host the api/ + protection/ folders on a real PHP server (any
+   shared/VPS host with PHP 7.4+), then set the full origin below —
+   e.g. 'https://your-php-host.com'. Leave it '' only when this HTML is
+   served from the SAME PHP host as the api/ folder. */
+window.YUSH_API_BASE = ''; // static / Vercel — no PHP backend
+window.YUSH_STATIC = true;
+</script>
+<script>
+/* Critical UI helpers — load before modules so clicks never silently fail */
+window.togglePwd = function (id, btn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  if (btn) {
+    btn.classList.toggle('is-visible', !!show);
+    btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+    var eye = btn.querySelector('.eye-open');
+    var eyeOff = btn.querySelector('.eye-off');
+    if (eye && eyeOff) {
+      eye.style.setProperty('display', show ? 'none' : 'block', 'important');
+      eyeOff.style.setProperty('display', show ? 'block' : 'none', 'important');
+    }
+  }
+};
+window.showLogin = window.showLogin || function () {
+  var a=document.getElementById('authLoginView'), b=document.getElementById('authRegisterView');
+  if(a)a.style.display=''; if(b)b.style.display='none';
+};
+window.showRegister = window.showRegister || function () {
+  /* Registration disabled — license keys only */
+  window.showLogin && window.showLogin();
+};
+/* Early session restore — hide login logo flash if still logged in (1-day TTL) */
+(function () {
+  try {
+    var KEY = '__yush_session_v3__';
+    var raw = localStorage.getItem(KEY);
+    if (!raw) return;
+    var s = JSON.parse(raw);
+    if (!s || !s.key) return;
+    var exp = s.expiresAt || ((s.loginAt || 0) + 86400000);
+    if (Date.now() > exp) {
+      localStorage.removeItem(KEY);
+      return;
+    }
+    document.documentElement.classList.add('yush-authed');
+  } catch (e) {}
+})();
+</script>
+<style>
+/* Prevent auth flash when session is already valid */
+html.yush-authed #authOverlay { display: none !important; }
+html.yush-authed #mainApp { display: block !important; }
+</style>
+<script>window.YUSH_GOOGLE_CLIENT_ID="1014722402497-nhdrn7vghs36dpnop4tebsooja0rhjpa.apps.googleusercontent.com";</script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="app" id="app">
+
+      <!-- ════════════════════ AUTH GATE ════════════════════ -->
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-card" id="authCard">
+      <div class="auth-brand auth-brand-top">
+        <div class="auth-logo" aria-hidden="true">
+          <img src="assets/banner.png" alt="YUSH TOOLS" class="auth-logo-img">
+        </div>
+        <div class="auth-brand-title">YUSH TOOLS</div>
+        <div class="auth-brand-sub"><span class="auth-secure-dot"></span> Secure authentication</div>
+      </div>
+
+      <h1 class="auth-heading" id="authHeading">Welcome back</h1>
+      <p class="auth-desc" id="authDesc">Enter your license key to access your tools.</p>
+
+      <!-- Login (license only) -->
+      <div class="auth-view" id="authLoginView">
+        <div class="auth-field">
+          <label>LICENSE KEY</label>
+          <input type="text" id="loginLicense" placeholder="YUSH-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" style="font-family:var(--font-mono, 'JetBrains Mono', monospace); letter-spacing:0.05em; text-transform:uppercase;">
+        </div>
+        <div class="auth-turnstile-wrap" id="loginTurnstileWrap">
+          <div id="loginTurnstile"></div>
+        </div>
+        <label class="auth-remember">
+          <input type="checkbox" id="rememberMe">
+          <span>Remember key</span>
+        </label>
+        <button class="btn-primary full" id="btnLogin" type="button">Sign In</button>
+        <div class="auth-error" id="loginError"></div>
+      </div>
+
+      <!-- Register disabled (kept hidden for DOM compatibility) -->
+      <div class="auth-view" id="authRegisterView" style="display:none" aria-hidden="true"></div>
+    </div>
+  </div>
+
+<!-- ════════════════════ MAIN APP ════════════════════ -->
+  <div class="main-app" id="mainApp" style="display:none">
+
+    <!-- Top Bar (matches reference image 1) -->
+    <header class="topbar">
+      <button class="topbar-burger" id="btnBurger" type="button" aria-label="Menu">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/>
+        </svg>
+      </button>
+      <div class="topbar-title" id="topbarTitle">Offset Updater</div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="btnNotif" type="button" title="Notifications" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" id="notifBadge" style="display:none">0</span>
+        </button>
+        <button class="icon-btn" id="btnTheme" type="button" title="Toggle theme" aria-label="Theme">
+          <svg class="theme-icon-dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg class="theme-icon-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <button class="profile-avatar" id="btnProfile" type="button" title="Profile" aria-label="Profile">Y</button>
+      </div>
+    </header>
+
+    <!-- Side Drawer (matches reference image 3) -->
+    <div class="drawer-overlay" id="drawerOverlay"></div>
+    <aside class="drawer" id="drawer">
+      <div class="drawer-header">
+        <div class="drawer-brand">
+          <div class="drawer-logo"><img src="assets/banner.png" alt="YUSH TOOLS" class="drawer-logo-img"></div>
+          <div>
+            <div class="drawer-title">YUSH TOOLS</div>
+            <div class="drawer-sub">Control Panel</div>
+          </div>
+        </div>
+        <button class="drawer-close" id="btnDrawerClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="drawer-section-label">WORKSPACE</div>
+      <nav class="drawer-nav" id="drawerNav">
+        <button class="drawer-item active" data-tab="dashboard">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Dashboard</span>
+        </button>
+        <button class="drawer-item" data-tab="updater">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.66 0 3-4.03 3-9s-1.34-9-3-9m0 18c-1.66 0-3-4.03-3-9s1.34-9 3-9m-9 9a9 9 0 0 1 9-9"/></svg>
+          <span>Offset Updater</span>
+        </button>
+        <button class="drawer-item" data-tab="finder">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Offset Finder</span>
+        </button>
+        <button class="drawer-item" data-tab="hook">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          <span>Hook Builder</span>
+        </button>
+        <button class="drawer-item" data-tab="dummy">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Dummy Detector</span>
+        </button>
+        <button class="drawer-item" data-tab="converter">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          <span>Bypass Formatting</span>
+        </button>
+        <button class="drawer-item" data-tab="developer">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          <span>Developer</span>
+        </button>
+        <button class="drawer-item" data-tab="settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+        <!-- Admin Panel – only visible for owner -->
+        <button class="drawer-item admin-only" data-tab="admin" style="display:none">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>Admin Panel</span>
+        </button>
+      </nav>
+      <div class="drawer-footer">
+        <button class="drawer-logout" id="btnLogout" type="button">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Log out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Profile Popover (matches reference image 2) -->
+    <div class="profile-popover" id="profilePopover" style="display:none">
+      <div class="profile-popover-header">
+        <div class="profile-popover-avatar" id="popoverAvatar">Y</div>
+        <div>
+          <div class="profile-popover-label">SIGNED IN ACCOUNT</div>
+          <div class="profile-popover-name" id="popoverName">—</div>
+          <div class="profile-popover-handle" id="popoverHandle">@—</div>
+        </div>
+      </div>
+      <div class="profile-popover-meta">
+        <div class="profile-meta-row"><span>Role</span><span id="popoverRole">User</span></div>
+        <div class="profile-meta-row"><span>Account status</span><span class="status-active" id="popoverStatus">Active</span></div>
+        <div class="profile-meta-row"><span>Account expiry</span><span id="popoverExpiry">Never</span></div>
+      </div>
+      <button class="profile-manage-btn" id="btnManageAccount" type="button">
+        Manage account
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+
+    <!-- Notification dropdown -->
+    <div class="notif-dropdown" id="notifDropdown" style="display:none">
+      <div class="notif-header-row">
+        <div>
+          <div class="notif-kicker">WORKSPACE FEED</div>
+          <div class="notif-header">Notifications</div>
+        </div>
+        <div class="notif-header-actions">
+          <span class="notif-count-pill" id="notifCountPill">0</span>
+          <button type="button" class="notif-mark-btn" id="btnMarkNotifsRead">Clear</button>
+        </div>
+      </div>
+      <div class="notif-list" id="notifList">
+        <div class="notif-empty">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          <div>No Notification</div>
+        </div>
+      </div>
+      <button type="button" class="notif-footer-btn" id="btnNotifOpenDash">Open dashboard
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </button>
+    </div>
+
+    <!-- ════════ CONTENT PANELS ════════ -->
+    <main class="content" id="content">
+
+      <!-- ── TAB 1: Offset Updater ── -->
+      
+      <!-- ── TAB: Dashboard ── -->
+      <section class="tab-panel active" id="tab-dashboard">
+        <div class="dash-welcome card">
+          <div class="dash-welcome-text">
+            <h2 id="dashWelcome">Welcome back</h2>
+            <p>Review workspace activity and continue your latest update workflow.</p>
+          </div>
+          <button type="button" class="dash-play-btn" id="btnDashGoUpdater" title="Open Updater">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="8 5 20 12 8 19 8 5"/></svg>
+          </button>
+        </div>
+        <div class="dash-stats">
+          <div class="dash-stat"><div class="dash-stat-icon ds-dump" style="background:linear-gradient(135deg,#ef4444,#b91c1c)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div><div class="dash-stat-lbl">BANNED</div><div class="dash-stat-val" id="dashBanned">0</div></div></div>
+          <div class="dash-stat"><div class="dash-stat-icon ds-acc"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div><div><div class="dash-stat-lbl">ACCOUNTS</div><div class="dash-stat-val" id="dashAccounts">0</div></div></div>
+          <div class="dash-stat"><div class="dash-stat-icon ds-ok"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="dash-stat-lbl">COMPLETED</div><div class="dash-stat-val" id="dashCompleted">0</div></div></div>
+          <div class="dash-stat"><div class="dash-stat-icon ds-rev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><div><div class="dash-stat-lbl">NEEDS REVIEW</div><div class="dash-stat-val" id="dashReview">0</div></div></div>
+        </div>
+        <div class="card dash-card">
+          <div class="dash-card-head"><span class="dash-kicker">WORKSPACE HEALTH</span><span class="dash-live">Live</span></div>
+          <h3>Asset mix</h3>
+          <div class="dash-ring-wrap">
+            <svg viewBox="0 0 120 120" width="140" height="140" class="dash-ring">
+              <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(139,92,246,0.15)" stroke-width="12"/>
+              <circle cx="60" cy="60" r="48" fill="none" stroke="#8b5cf6" stroke-width="12" stroke-dasharray="200 301" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+              <circle cx="60" cy="60" r="48" fill="none" stroke="#22d3ee" stroke-width="12" stroke-dasharray="80 301" stroke-dashoffset="-200" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+              <text x="60" y="58" text-anchor="middle" fill="currentColor" font-size="22" font-weight="700" id="dashTracked">0</text>
+              <text x="60" y="74" text-anchor="middle" fill="#9aa8b8" font-size="9">Tracked offsets</text>
+            </svg>
+          </div>
+          <div class="dash-legend">
+            <div><span class="dot purple"></span> RVA offsets <b id="dashRva">0</b></div>
+            <div><span class="dot cyan"></span> Field offsets <b id="dashField">0</b></div>
+            <div><span class="dot gray"></span> Banned <b id="dashBanned2">0</b></div>
+          </div>
+        </div>
+        <div class="card dash-card">
+          <div class="dash-card-head"><span class="dash-kicker">UPDATE PIPELINE</span><span class="dash-chip">All time</span></div>
+          <h3>Job completion</h3>
+          <div class="dash-pct" id="dashSuccess">100%</div>
+          <div class="dash-bar"><div class="dash-bar-fill" style="width:100%"></div></div>
+          <div class="dash-legend">
+            <div><span class="dot green"></span> Completed <b id="dashJobsOk">0</b></div>
+            <div><span class="dot red"></span> Needs review <b id="dashJobsRev">0</b></div>
+            <div><span class="dot gray"></span> Total jobs <b id="dashJobsTotal">0</b></div>
+          </div>
+        </div>
+
+        <div class="card dash-card">
+          <div class="dash-card-head"><span class="dash-kicker">COVERAGE SNAPSHOT</span><span class="dash-chip">Current</span></div>
+          <h3>Version readiness</h3>
+          <div class="dash-ring-wrap">
+            <svg viewBox="0 0 120 120" width="140" height="140" class="dash-ring">
+              <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(34,211,238,0.12)" stroke-width="12"/>
+              <circle id="dashReadyRing" cx="60" cy="60" r="48" fill="none" stroke="#22d3ee" stroke-width="12" stroke-dasharray="235 301" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+              <text x="60" y="58" text-anchor="middle" fill="currentColor" font-size="22" font-weight="700" id="dashReadyPct">78%</text>
+              <text x="60" y="74" text-anchor="middle" fill="#9aa8b8" font-size="9">Ready to update</text>
+            </svg>
+          </div>
+          <div class="dash-legend">
+            <div><span class="dot purple"></span> Latest package <b id="dashLatestPkg">Ready</b></div>
+            <div><span class="dot cyan"></span> Active users <b id="dashActiveUsers">0</b></div>
+            <div><span class="dot" style="background:#f59e0b"></span> Next action <b id="dashNextAction">Update</b></div>
+          </div>
+        </div>
+        <div class="card dash-card">
+          <div class="dash-card-head"><span class="dash-kicker">TREND LINE</span><span class="dash-chip">Recent</span></div>
+          <h3>Update pulse</h3>
+          <div class="dash-pulse-wrap">
+            <svg viewBox="0 0 320 100" width="100%" height="100" preserveAspectRatio="none" class="dash-pulse">
+              <defs>
+                <linearGradient id="pulseFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="rgba(139,92,246,0.35)"/>
+                  <stop offset="100%" stop-color="rgba(139,92,246,0)"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,80 C40,70 60,40 90,50 S140,20 170,35 S230,70 260,40 S300,20 320,15 L320,100 L0,100 Z" fill="url(#pulseFill)"/>
+              <path d="M0,80 C40,70 60,40 90,50 S140,20 170,35 S230,70 260,40 S300,20 320,15" fill="none" stroke="#8b5cf6" stroke-width="2.5"/>
+            </svg>
+          </div>
+          <div class="dash-pulse-meta">
+            <b id="dashPulseCount">0 completed updates</b>
+            <p>Keep the latest dump ready for the next release cycle.</p>
+          </div>
+        </div>
+
+      </section>
+
+
+      <!-- ── TAB: Offset Updater (local files) ── -->
+      <section class="tab-panel" id="tab-updater">
+
+        <section class="step-card no-glow">
+          <div class="step-header">
+            <div class="step-num">1</div>
+            <div class="step-info">
+              <h3>Old Dump (Reference)</h3>
+              <p>Previous dump used as the baseline for comparison.</p>
+            </div>
+          </div>
+          <div class="file-preview" id="fp-old">
+            <div class="file-preview-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div class="file-preview-info">
+              <div class="file-preview-name" id="fpn-old">—</div>
+              <div class="file-preview-meta" id="fpm-old">—</div>
+            </div>
+            <div class="file-preview-check">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#07130d" stroke-width="3.4"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+          <div class="file-row">
+            <div class="file-display" id="fd-old">
+              <svg class="folder-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span id="fd-old-txt">No file selected</span>
+            </div>
+            <button class="browse-btn" type="button" onclick="window.yushPick&&window.yushPick('old')">Choose File</button>
+          </div>
+          <p class="step-hint">Load old/previous dump.cs — establishes the RVA / field offset baseline.</p>
+          <input type="file" id="f-old" accept="*" hidden>
+        </section>
+
+        <section class="step-card no-glow">
+          <div class="step-header">
+            <div class="step-num">2</div>
+            <div class="step-info">
+              <h3>New Dump (Updated)</h3>
+              <p>Latest dump containing the updated offset references.</p>
+            </div>
+          </div>
+          <div class="file-preview" id="fp-new">
+            <div class="file-preview-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div class="file-preview-info">
+              <div class="file-preview-name" id="fpn-new">—</div>
+              <div class="file-preview-meta" id="fpm-new">—</div>
+            </div>
+            <div class="file-preview-check">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#07130d" stroke-width="3.4"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+          <div class="file-row">
+            <div class="file-display" id="fd-new">
+              <svg class="folder-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span id="fd-new-txt">No file selected</span>
+            </div>
+            <button class="browse-btn" type="button" onclick="window.yushPick&&window.yushPick('new')">Choose File</button>
+          </div>
+          <p class="step-hint">Load new/updated dump.cs — source of truth for replacement.</p>
+          <input type="file" id="f-new" accept="*" hidden>
+        </section>
+
+        <section class="step-card no-glow">
+          <div class="step-header">
+            <div class="step-num">3</div>
+            <div class="step-info">
+              <h3>Target File</h3>
+              <p>Source file where matching offsets will be updated.</p>
+            </div>
+          </div>
+          <div class="file-preview" id="fp-tgt">
+            <div class="file-preview-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div class="file-preview-info">
+              <div class="file-preview-name" id="fpn-tgt">—</div>
+              <div class="file-preview-meta" id="fpm-tgt">—</div>
+            </div>
+            <div class="file-preview-check">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#07130d" stroke-width="3.4"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+          <div class="file-row">
+            <div class="file-display" id="fd-tgt">
+              <svg class="folder-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span id="fd-tgt-txt">No file selected (.cpp / .lua / .h / .cs)</span>
+            </div>
+            <button class="browse-btn" type="button" onclick="window.yushPick&&window.yushPick('tgt')">Choose File</button>
+          </div>
+          <p class="step-hint">Any plain-text file containing 0x hex offsets.</p>
+          <input type="file" id="f-tgt" accept="*" hidden>
+        </section>
+
+        <button class="btn-execute" id="btnExec" type="button" disabled>
+          <div class="btn-execute-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </div>
+          <div class="btn-execute-text">
+            <span class="btn-execute-title" id="btnLabel">Start Update</span>
+            <span class="btn-execute-sub">Compare and synchronize offsets</span>
+          </div>
+        </button>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+        </div>
+
+        <section class="summary-card" id="statsRow">
+          <div class="summary-header">
+            <div class="summary-title">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="4" y1="20" x2="4" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="20" y1="20" x2="20" y2="14"/></svg>
+              Update Summary
+            </div>
+            <div class="summary-pills" id="summaryPills">
+              <span class="pill active" data-pill="ready"><i></i>Ready</span>
+              <span class="pill" data-pill="processing"><i></i>Processing</span>
+              <span class="pill" data-pill="completed"><i></i>Completed</span>
+              <span class="pill" data-pill="error"><i></i>Error</span>
+            </div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon si-same"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff" stroke="none"><polygon points="12 2 15 9 22 9.5 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.5 9 9"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">Already Latest</div><div class="stat-val" id="ssame">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon si-ok"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">Updated</div><div class="stat-val" id="sok">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon si-fail"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">Failed</div><div class="stat-val" id="sfail">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon si-ign"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.4"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4" fill="#fff" stroke="none"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">Ignored</div><div class="stat-val" id="sign">0</div></div>
+            </div>
+            <div class="stat-card full-width">
+              <div class="stat-icon si-total"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">Total Matches</div><div class="stat-val" id="stotal">0</div></div>
+            </div>
+          </div>
+
+        </section>
+
+        <div class="dl-wrap" id="dlWrap" style="display:none">
+          <button class="btn-dl-zip" id="btnDownload" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Updated Zip
+          </button>
+        </div>
+        <div class="results-wrap" id="resultsWrap" style="display:none;margin-top:16px">
+          <div id="sec-updated" style="display:none">
+            <div class="section-header">
+              <div class="section-title" style="color:var(--green)">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> Updated
+              </div>
+              <div class="section-header-line"></div>
+              <span id="sc-updated" class="section-count"></span>
+            </div>
+            <div id="cards-updated" class="yush-result-cards"></div>
+          </div>
+          <div id="sec-same" style="display:none">
+            <div class="section-header">
+              <div class="section-title" style="color:#38bdf8">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="#38bdf8" stroke="none"><polygon points="12 2 15 9 22 9.5 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.5 9 9"/></svg> Already Latest
+              </div>
+              <div class="section-header-line"></div>
+              <span id="sc-same" class="section-count"></span>
+            </div>
+            <div id="cards-same" class="yush-result-cards"></div>
+          </div>
+          <div id="sec-failed" style="display:none">
+            <div class="section-header">
+              <div class="section-title" style="color:#f87171">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Failed
+              </div>
+              <div class="section-header-line"></div>
+              <span id="sc-failed" class="section-count"></span>
+            </div>
+            <div id="cards-failed" class="yush-result-cards"></div>
+          </div>
+          <div id="sec-ignored" style="display:none">
+            <div class="section-header">
+              <div class="section-title" style="color:#fbbf24">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="3"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4" fill="#fbbf24" stroke="none"/></svg> Ignored
+              </div>
+              <div class="section-header-line"></div>
+              <span id="sc-ignored" class="section-count"></span>
+            </div>
+            <div id="cards-ignored" class="yush-result-cards"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── TAB 2: Offset Finder ── -->
+      <section class="tab-panel" id="tab-finder">
+
+        <div class="card">
+          <div class="file-row">
+            <div class="finder-path-display" id="finderPathDisplay">No file loaded</div>
+            <button class="btn-browse" type="button" onclick="window.loadFinderFile?window.loadFinderFile():document.getElementById('finderInput').click()">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+              Load
+            </button>
+            <input type="file" id="finderInput" accept=".cs,.txt,*" hidden>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="search-row">
+            <input class="search-input" id="finderSearch" placeholder="Enter method name, class, or offset (0x...)" autocomplete="off" spellcheck="false">
+            <button class="btn-primary" id="btnFind" type="button" onclick="window.doFind&&window.doFind()">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Find
+            </button>
+          </div>
+          <div class="filter-chip-row">
+            <button class="filter-chip active" data-filter="all" type="button">All</button>
+            <button class="filter-chip" data-filter="methods" type="button">Methods</button>
+            <button class="filter-chip" data-filter="fields" type="button">Fields</button>
+          </div>
+        </div>
+
+        <section class="summary-card" id="finderSummaryCard">
+          <div class="summary-header">
+            <div class="summary-title">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Find Summary
+            </div>
+            <div class="summary-pills" id="findStatusRow">
+              <span class="pill active" data-st="ready"><i></i>Ready</span>
+              <span class="pill" data-st="searching"><i></i>Searching</span>
+              <span class="pill" data-st="done"><i></i>Done</span>
+              <span class="pill" data-st="empty"><i></i>No match</span>
+            </div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon si-ok" style="background:linear-gradient(135deg,#3b82f6,#2563eb)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+              <div class="stat-body"><div class="stat-lbl">Matches</div><div class="stat-val" id="finderStatFound">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              </div>
+              <div class="stat-body"><div class="stat-lbl">Methods</div><div class="stat-val" id="finderStatMethods">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background:linear-gradient(135deg,#22d3ee,#0891b2)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+              </div>
+              <div class="stat-body"><div class="stat-lbl">Fields</div><div class="stat-val" id="finderStatFields">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+              </div>
+              <div class="stat-body"><div class="stat-lbl">Indexed</div><div class="stat-val" id="finderStatIndexed">0</div></div>
+            </div>
+          </div>
+        </section>
+        <div class="finder-results" id="finderResultsWrap" style="display:none">
+          <div class="section-header">
+            <div class="section-title" style="color:var(--cyan)">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Results
+            </div>
+            <div class="section-header-line"></div>
+            <span id="finderResultCount" class="section-count"></span>
+          </div>
+          <div id="finderResultCards"></div>
+        </div>
+        <div class="finder-empty" id="finderEmptyHint">Load a dump.cs and search to see results here.</div>
+      </section>
+
+      <!-- ── TAB: Dummy Detector ── -->
+      <section class="tab-panel" id="tab-dummy">
+<!-- File Load Card -->
+        <div class="card">
+          <div class="settings-card-head" style="margin-bottom:12px">
+            <div class="settings-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div>
+              <div class="settings-card-title">libanogs.so.c File</div>
+              <div class="settings-card-sub" id="ddFileStatus">No file loaded</div>
+            </div>
+          </div>
+          <div class="file-row">
+            <div class="finder-path-display" id="ddFilePath">No file selected...</div>
+            <button class="btn-browse" type="button" id="ddBrowseBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+              Browse
+            </button>
+            <input type="file" id="ddFileInput" accept="*" hidden>
+          </div>
+        </div>
+
+        <!-- Offset Input Card -->
+        <div class="card">
+          <div class="settings-card-head" style="margin-bottom:12px">
+            <div class="settings-icon" style="background:linear-gradient(135deg,#22d3ee,#0891b2)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div>
+              <div class="settings-card-title">Paste Offsets</div>
+              <div class="settings-card-sub">One per line · 0x prefix required</div>
+            </div>
+          </div>
+          <textarea id="ddOffsetInput" class="bp-offsets-ta" rows="6" spellcheck="false" placeholder="0x11D910&#10;0x1BCF3A&#10;0x22A45C..."></textarea>
+        </div>
+
+        <!-- Detect Button — before Scan Results -->
+        <button class="btn-execute dd-detect-btn" id="ddDetectBtn" type="button" style="margin-bottom:16px;width:100%">
+          <div class="btn-execute-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="btn-execute-text">
+            <span class="btn-execute-title">Detect Dummy Offsets</span>
+            <span class="btn-execute-sub">Scan libanogs.so.c for dummy definitions</span>
+          </div>
+        </button>
+
+        <!-- Stats Row — always visible, Total is full width -->
+        <section class="summary-card" id="ddStatsCard">
+          <div class="summary-header">
+            <div class="summary-title">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Scan Results
+            </div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon si-ok"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">NOT DUMMY</div><div class="stat-val" id="ddStatReal" style="color:var(--green)">0</div></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon si-fail"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">DUMMY</div><div class="stat-val" id="ddStatDummy" style="color:var(--red)">0</div></div>
+            </div>
+            <div class="stat-card dd-total-card">
+              <div class="stat-icon si-total"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+              <div class="stat-body"><div class="stat-lbl">TOTAL</div><div class="stat-val" id="ddStatTotal" style="color:var(--cyan)">0</div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Results: Not Dummy -->
+        <div id="ddResultReal" style="display:none; margin-top:4px">
+          <div class="section-header">
+            <div class="section-title" style="color:var(--green)">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              Not Dummy Offsets
+            </div>
+            <div class="section-header-line"></div>
+            <span id="ddRealCount" class="section-count"></span>
+          </div>
+          <div class="card" style="padding:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em">REAL OFFSETS</span>
+            </div>
+            <p style="font-size:11px;color:var(--text3);margin:0 0 10px;text-align:center;letter-spacing:.02em">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:3px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Click the offset to show the function
+            </p>
+            <div id="ddRealList" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+        </div>
+
+        <!-- Results: Dummy -->
+        <div id="ddResultDummy" style="display:none; margin-top:4px">
+          <div class="section-header">
+            <div class="section-title" style="color:var(--red)">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Dummy Offsets
+            </div>
+            <div class="section-header-line"></div>
+            <span id="ddDummyCount" class="section-count"></span>
+          </div>
+          <div class="card" style="padding:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em">DUMMY OFFSETS</span>
+            </div>
+            <p style="font-size:11px;color:var(--text3);margin:0 0 10px;text-align:center;letter-spacing:.02em">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:3px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Click the offset to show the function
+            </p>
+            <div id="ddDummyList" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ── TAB: Hook Builder ── -->
+      <section class="tab-panel" id="tab-hook">
+
+        <div class="card hb-card">
+          <div class="hb-card-head">
+            <div class="hb-head-icon cfg">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            </div>
+            <div>
+              <div class="hb-kicker">CONFIGURE</div>
+              <h3 class="hb-card-title">Hook inputs</h3>
+            </div>
+          </div>
+
+          <div class="hb-dump-box">
+            <div class="hb-dump-head">
+              <div class="hb-dump-ico">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </div>
+              <div>
+                <div class="hb-dump-title">Read the inputs from a dump entry</div>
+                <div class="hb-dump-sub">This is the source block that the fields come from.</div>
+              </div>
+            </div>
+            <div class="hb-dump-editor" id="hbDumpEditor">
+              <pre class="hb-dump-highlight" id="hbDumpHighlight" aria-hidden="true"></pre>
+              <textarea id="hbDumpPaste" class="hb-dump-textarea" spellcheck="false" readonly tabindex="-1" aria-readonly="true"></textarea>
+            </div>
+            <div class="hb-meta-grid" id="hbMetaGrid">
+              <div class="hb-meta-chip">
+                <span class="hb-meta-lbl">CLASS NAME</span>
+                <span class="hb-meta-val" id="hbMetaClass">BlueprintWeaponInfo</span>
+              </div>
+              <div class="hb-meta-chip">
+                <span class="hb-meta-lbl">OFFSET</span>
+                <span class="hb-meta-val" id="hbMetaOffset">0x79B2A00</span>
+              </div>
+              <div class="hb-meta-chip">
+                <span class="hb-meta-lbl">METHOD</span>
+                <span class="hb-meta-val" id="hbMetaMethod">SetLockNewFlag</span>
+              </div>
+              <div class="hb-meta-chip">
+                <span class="hb-meta-lbl">RETURN TYPE</span>
+                <span class="hb-meta-val" id="hbMetaRet">void</span>
+              </div>
+              <div class="hb-meta-chip hb-meta-wide">
+                <span class="hb-meta-lbl">PARAMETERS</span>
+                <span class="hb-meta-val" id="hbMetaParams">bool visible</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hb-fields">
+            <div class="auth-field hb-field">
+              <label class="hb-lbl">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+                OFFSET
+              </label>
+              <input type="text" id="hbOffset" value="" placeholder="0x123456" spellcheck="false" autocomplete="off">
+            </div>
+            <div class="auth-field hb-field">
+              <label class="hb-lbl">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                CLASS
+              </label>
+              <input type="text" id="hbClass" value="" placeholder="BlueprintWeaponInfo" spellcheck="false" autocomplete="off">
+            </div>
+            <div class="auth-field hb-field">
+              <label class="hb-lbl">METHOD</label>
+              <input type="text" id="hbMethod" value="" placeholder="SetLockNewFlag" spellcheck="false" autocomplete="off">
+            </div>
+            <div class="auth-field hb-field hb-ret-wrap">
+              <label class="hb-lbl">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+                RETURN TYPE
+              </label>
+              <button type="button" class="hb-type-trigger" id="hbRetTrigger" aria-haspopup="listbox">
+                <span id="hbRetLabel" class="hb-placeholder">Select Return Type</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <input type="hidden" id="hbReturn" value="">
+              <div class="hb-type-panel" id="hbRetPanel" role="listbox" hidden></div>
+            </div>
+            <div class="auth-field hb-field">
+              <label class="hb-lbl">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                PARAMETERS
+              </label>
+              <input type="text" id="hbParams" value="" placeholder="bool visible" spellcheck="false" autocomplete="off">
+            </div>
+          </div>
+        </div>
+
+        <div class="card hb-card">
+          <div class="hb-card-head">
+            <div class="hb-head-icon out">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div>
+              <div class="hb-kicker out">GENERATED OUTPUT</div>
+              <h3 class="hb-card-title">Native template</h3>
+            </div>
+          </div>
+          <div class="hb-actions">
+            <button type="button" class="hb-btn-secondary" id="hbCopy">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copy
+            </button>
+            <button type="button" class="btn-primary" id="hbDownload">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download
+            </button>
+          </div>
+          <div class="hb-code-wrap">
+            <pre class="hb-code" id="hbCode" aria-live="polite"><code id="hbCodeInner"></code></pre>
+            <div class="hb-code-badge" id="hbLineCount">0 lines</div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ── TAB 3: Bypass Formatting ── -->
+      <section class="tab-panel" id="tab-converter">
+<div class="card bp-input-card">
+          <div class="auth-field">
+            <label>LIBRARY</label>
+            <input type="text" id="bpLibrary" value="libanogs.so" spellcheck="false" autocomplete="off" placeholder="libanogs.so">
+          </div>
+          <div class="auth-field">
+            <label>HEX PATCH</label>
+            <input type="text" id="bpHex" value="00 00 80 D2 C0 03 5F D6" spellcheck="false" autocomplete="off" placeholder="00 00 80 D2 C0 03 5F D6">
+          </div>
+          <div class="auth-field">
+            <label>OFFSETS</label>
+            <textarea id="bpOffsets" class="bp-offsets-ta" rows="5" spellcheck="false" placeholder="Paste your offset here&#10;0x4E3E9D4"></textarea>
+            <div class="bp-hint">One offset per line · 0x prefix optional</div>
+          </div>
+          <button class="btn-primary full" type="button" id="btnBpGenerate">Generate Formats</button>
+        </div>
+
+        <div id="bpResults" class="bp-results" style="display:none"></div>
+      </section>
+
+      <!-- ── TAB 4: Developer ── -->
+      <section class="tab-panel" id="tab-developer">
+<div class="dev-card">
+          <div class="dev-avatar"><img src="assets/banner.png" alt="YUSH TOOLS" class="dev-avatar-img" onerror="this.style.display='none'"></div>
+          <div class="dev-role">Developer of YUSH TOOLS</div>
+          <a class="dev-handle" href="https://t.me/PrimeYush" target="_blank" rel="noopener">
+            <svg width="17" height="17" viewBox="0 0 240 240" fill="currentColor"><circle cx="120" cy="120" r="120" fill="#29a9eb"/><path d="M180 72l-19 92c-1.4 6.4-5.2 8-10.6 5l-29-21.4-14 13.5c-1.6 1.6-2.9 2.9-5.9 2.9l2.1-30 55-49.7c2.4-2.1-.5-3.3-3.7-1.2l-68 42.8-29.3-9.2c-6.4-2-6.5-6.4 1.3-9.5l114.6-44.2c5.3-2 10 1.3 8.5 9z" fill="#fff"/></svg>
+            <span>@PrimeYush</span>
+          </a>
+        </div>
+
+        <div class="settings-section-title">Partners</div>
+        <div class="partner-list">
+          <a class="partner-row" href="https://t.me/zh4cks" target="_blank" rel="noopener">
+            <span class="partner-avatar"><img src="assets/zhack.png" alt="@zh4cks" class="partner-avatar-img"></span>
+            <div class="partner-info">
+              <div class="partner-label">Partner</div>
+              <div class="partner-handle">@zh4cks</div>
+            </div>
+            <svg class="link-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+          <a class="partner-row" href="https://t.me/NullHynn" target="_blank" rel="noopener">
+            <span class="partner-avatar"><img src="assets/hynn.png" alt="@NullHynn" class="partner-avatar-img"></span>
+            <div class="partner-info">
+              <div class="partner-label">Partner</div>
+              <div class="partner-handle">@NullHynn</div>
+            </div>
+            <svg class="link-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+        </div>
+
+        <div class="settings-section-title">Social Platforms</div>
+        <div class="link-list">
+          <a class="link-row" href="https://t.me/NocturneTeamChannel" target="_blank" rel="noopener">
+            <span class="link-ic ic-tg">
+              <svg width="16" height="16" viewBox="0 0 240 240" fill="#fff"><path d="M180 72l-19 92c-1.4 6.4-5.2 8-10.6 5l-29-21.4-14 13.5c-1.6 1.6-2.9 2.9-5.9 2.9l2.1-30 55-49.7c2.4-2.1-.5-3.3-3.7-1.2l-68 42.8-29.3-9.2c-6.4-2-6.5-6.4 1.3-9.5l114.6-44.2c5.3-2 10 1.3 8.5 9z"/></svg>
+            </span>
+            <div><div class="link-title">Telegram Channel</div><div class="link-sub">@NocturneTeamChannel</div></div>
+            <svg class="link-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+          <a class="link-row" href="https://www.tiktok.com/@primeyush?_r=1&_t=ZS-99fofnYa3n7" target="_blank" rel="noopener">
+            <span class="link-ic ic-tiktok">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
+            </span>
+            <div><div class="link-title">TikTok</div><div class="link-sub">@primeyush</div></div>
+            <svg class="link-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+          <a class="link-row" href="https://www.youtube.com/@PrimeYush" target="_blank" rel="noopener">
+            <span class="link-ic ic-youtube">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M23.5 6.2a3 3 0 00-2.1-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.4.6A3 3 0 00.5 6.2 31 31 0 000 12a31 31 0 00.5 5.8 3 3 0 002.1 2.1c1.8.6 9.4.6 9.4.6s7.6 0 9.4-.6a3 3 0 002.1-2.1A31 31 0 0024 12a31 31 0 00-.5-5.8zM9.6 15.5v-7l6.3 3.5-6.3 3.5z"/></svg>
+            </span>
+            <div><div class="link-title">YouTube</div><div class="link-sub">@PrimeYush</div></div>
+            <svg class="link-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+        </div>
+
+        <div class="settings-section-title">Support</div>
+        <div class="link-list">
+          <a class="link-row" href="https://t.me/PrimeYush" target="_blank" rel="noopener">
+            <span class="link-ic ic-tg">
+              <svg width="16" height="16" viewBox="0 0 240 240" fill="#fff"><path d="M180 72l-19 92c-1.4 6.4-5.2 8-10.6 5l-29-21.4-14 13.5c-1.6 1.6-2.9 2.9-5.9 2.9l2.1-30 55-49.7c2.4-2.1-.5-3.3-3.7-1.2l-68 42.8-29.3-9.2c-6.4-2-6.5-6.4 1.3-9.5l114.6-44.2c5.3-2 10 1.3 8.5 9z"/></svg>
+            </span>
+            <div><div class="link-title">Report an issue</div><div class="link-sub">Message @PrimeYush directly</div></div>
+            <svg class="link-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+        </div>
+
+      </section>
+
+      <!-- ── TAB 5: Settings ── -->
+      <section class="tab-panel" id="tab-settings">
+<!-- License & Account -->
+        <div class="card settings-card">
+          <div class="settings-card-head">
+            <div class="settings-icon lock">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            </div>
+            <div>
+              <div class="settings-card-title">License Information</div>
+              <div class="settings-card-sub">Your active key</div>
+            </div>
+          </div>
+          <div class="auth-field">
+            <label>LICENSE KEY</label>
+            <input type="text" id="settingsLicenseDisplay" readonly spellcheck="false" style="font-family:var(--font-mono,'JetBrains Mono',monospace);letter-spacing:0.04em;">
+          </div>
+          <div class="auth-field">
+            <label>KEY TYPE</label>
+            <input type="text" id="settingsKeyType" readonly>
+          </div>
+          <div class="auth-field">
+            <label>EXPIRY</label>
+            <input type="text" id="settingsExpiry" readonly>
+          </div>
+          <div class="auth-field">
+            <label>SESSION</label>
+            <input type="text" id="settingsSession" readonly>
+          </div>
+        </div>
+
+        <!-- Display name -->
+        <div class="card settings-card">
+          <div class="settings-card-head">
+            <div class="settings-icon mail">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div>
+              <div class="settings-card-title">Display Name</div>
+              <div class="settings-card-sub" id="settingsEmailDisplay">—</div>
+            </div>
+          </div>
+          <div class="auth-field">
+            <label>NAME</label>
+            <input type="text" id="setDisplayName" placeholder="Your display name" spellcheck="false" autocomplete="off">
+          </div>
+          <button class="btn-primary full" type="button" id="btnUpdateAccount">Save name</button>
+          <div class="auth-error" id="accountError"></div>
+        </div>
+
+<!-- Updater Preferences -->
+        <div class="card settings-card">
+          <div class="settings-card-head">
+            <div class="settings-icon gear">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            </div>
+            <div>
+              <div class="settings-card-title">Updater Preferences</div>
+              <div class="settings-card-sub">Pipeline options</div>
+            </div>
+          </div>
+          <label class="toggle-row">
+            <span>Auto-download result ZIP</span>
+            <input type="checkbox" id="setAutoDownload">
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-row">
+            <span>Click-to-copy hex values</span>
+            <input type="checkbox" id="setCopyEnabled" checked>
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- ── TAB 6: Admin Panel (owner only) ── -->
+      <section class="tab-panel" id="tab-admin">
+<!-- Allowed Emails Whitelist -->
+
+        <div class="card admin-card">
+          <div class="admin-card-head">
+            <div class="admin-head-left"><div class="admin-icon pending"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013 9.72a19.79 19.79 0 01-3.07-8.67A2 2 0 011.88 1h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l.91-.91a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg></div><div><h3>Allowed Emails</h3><p class="admin-sub">Only these emails can register</p></div></div>
+            <span class="badge" id="allowedCount">0</span>
+          </div>
+          <div class="auth-field"><label>ADD EMAIL</label>
+            <input type="email" id="allowedEmailInput" placeholder="user@gmail.com" spellcheck="false" autocomplete="off">
+          </div>
+          <button class="btn-primary full" type="button" id="btnAddAllowed">Add Email</button>
+          <div class="auth-error" id="allowedEmailErr"></div>
+          <div class="admin-list" id="allowedList">
+            <div class="admin-empty">No allowed emails yet</div>
+          </div>
+        </div>
+
+        <!-- Registered Users -->
+        <div class="card admin-card">
+          <div class="admin-card-head">
+            <div class="admin-head-left"><div class="admin-icon users"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div><div><h3>Registered Users</h3><p class="admin-sub">Manage roles &amp; access</p></div></div>
+            <span class="badge" id="userCount">0</span>
+          </div>
+          <div class="admin-list" id="userList">
+            <div class="admin-empty">No users yet</div>
+          </div>
+        </div>
+
+        <!-- Spread Notification -->
+        <div class="card admin-card">
+          <div class="admin-card-head">
+            <div class="admin-head-left"><div class="admin-icon pending">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            </div><div><h3>Spread Notification</h3><p class="admin-sub">Broadcast a title &amp; message to all users</p></div></div>
+          </div>
+          <div class="auth-field"><label>TITLE</label>
+            <input type="text" id="spreadTitle" placeholder="Maintenance notice" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="auth-field"><label>MESSAGE</label>
+            <textarea id="spreadMessage" class="spread-message" placeholder="Write the notification body…" spellcheck="false"></textarea>
+          </div>
+          <button class="btn-primary full" type="button" id="btnSpreadSend">Send to notifications</button>
+          <div class="auth-error" id="spreadErr"></div>
+          <div class="admin-list" id="spreadList" style="margin-top:14px">
+            <div class="admin-empty">No spread notifications yet</div>
+          </div>
+        </div>
+
+        <!-- IP Ban List -->
+        <div class="card admin-card">
+          <div class="admin-card-head">
+            <div class="admin-head-left"><div class="admin-icon pending">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+            </div><div><h3>IP Ban List</h3><p class="admin-sub">Manually blocked addresses</p></div></div>
+            <span class="badge danger" id="banIpCount">0</span>
+          </div>
+          <div class="auth-field"><label>IP ADDRESS</label>
+            <input type="text" id="banIpInput" placeholder="203.0.113.7" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="auth-field"><label>REASON (OPTIONAL)</label>
+            <input type="text" id="banIpReason" placeholder="e.g. repeated scan attempts" spellcheck="false" autocomplete="off">
+          </div>
+          <button class="btn-primary full" type="button" id="btnBanIp">Block IP</button>
+          <div class="auth-error" id="banIpErr"></div>
+          <div class="admin-list" id="banIpList">
+            <div class="admin-empty">No manually blocked IPs</div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+
+      <!-- ── TAB: Terms of Service ── -->
+      <section class="tab-panel" id="tab-terms">
+        <div class="legal-panel">
+          <p class="legal-page-sub">Usage terms for YUSH TOOLS</p>
+          <div class="legal-body" id="termsBody"></div>
+        </div>
+      </section>
+
+      <!-- ── TAB: Privacy Policy ── -->
+      <section class="tab-panel" id="tab-privacy">
+        <div class="legal-panel">
+          <p class="legal-page-sub">How your files and data are handled</p>
+          <div class="legal-body" id="privacyBody"></div>
+        </div>
+      </section>
+
+<!-- Legal Modal (Terms of Service / Privacy Policy) -->
+
+<script src="js/protection.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/finder.js"></script>
+<script src="js/hook-builder.js"></script>
+<script src="js/formatting.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
